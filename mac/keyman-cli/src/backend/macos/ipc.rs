@@ -24,7 +24,18 @@ use crate::keyboard::KeyboardId;
 
 pub fn send_select(id: &KeyboardId) -> Result<()> {
     let url = format!("keyman:select?path={}", percent_encode_path(id.as_str()));
-    let output = Command::new("/usr/bin/open").arg("-g").arg(&url).output()?;
+    // Use `-b <bundle id>` to route the URL specifically to the Keyman
+    // input-method app. Plain `open <url>` consults LaunchServices'
+    // default handler for the `keyman:` scheme, but multiple unrelated
+    // apps on a typical macOS install also claim `keyman:` (Convert
+    // Video, Encrypt Files, …); targeting by bundle id avoids that
+    // ambiguity.
+    let output = Command::new("/usr/bin/open")
+        .arg("-g")
+        .arg("-b")
+        .arg(super::KEYMAN_BUNDLE_ID)
+        .arg(&url)
+        .output()?;
     if !output.status.success() {
         return Err(CliError::UrlDispatchFailed {
             reason: String::from_utf8_lossy(&output.stderr).into_owned(),
