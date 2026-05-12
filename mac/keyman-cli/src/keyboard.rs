@@ -75,6 +75,13 @@ impl AsRef<str> for KeyboardId {
     }
 }
 
+/// A BCP-47-style language tag carried by a Keyman keyboard package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Language {
+    pub name: String,
+    pub id: String,
+}
+
 /// A single keyboard surfaced by `keyman list`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keyboard {
@@ -82,6 +89,7 @@ pub struct Keyboard {
     pub name: String,
     pub package: String,
     pub selected: bool,
+    pub languages: Vec<Language>,
 }
 
 /// Combined picture of input-method state on the host OS.

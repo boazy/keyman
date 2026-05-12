@@ -45,14 +45,15 @@ impl MacOsClient {
     fn build_keyboard(id: KeyboardId, selected_id: Option<&str>) -> Keyboard {
         let pkg = id.package().unwrap_or("").to_string();
         let stem = id.stem().unwrap_or("").to_string();
-        let name =
-            packages::display_name_for(&id, &keyboards_root()).unwrap_or_else(|| stem.clone());
+        let info = packages::info_for(&id, &keyboards_root());
+        let name = info.display_name.unwrap_or_else(|| stem.clone());
         let selected = selected_id == Some(id.as_str());
         Keyboard {
             id,
             name,
             package: pkg,
             selected,
+            languages: info.languages,
         }
     }
 }
@@ -90,6 +91,7 @@ impl KeymanClient for MacOsClient {
                         name: id.stem().unwrap_or("").to_string(),
                         package: id.package().unwrap_or("").to_string(),
                         selected: true,
+                        languages: Vec::new(),
                     })
                 }
             }

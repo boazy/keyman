@@ -125,16 +125,23 @@ Resolution rules (case-insensitive):
 removing fields is a breaking change and will bump the crate's major
 version.
 
-### `keyman list --json`
+### `keyman list --json` and `--all-languages`
 
 ```json
 {
   "keyboards": [
     {
+      "id": "/qpolish/qpolish.kmx",
+      "name": "Quick Polish",
+      "package": "qpolish",
+      "selected": false,
+      "language": "Undetermined"
+    },
+    {
       "id": "/sil_euro_latin/sil_euro_latin.kmx",
       "name": "EuroLatin (SIL)",
       "package": "sil_euro_latin",
-      "selected": true
+      "selected": false
     }
   ]
 }
@@ -147,6 +154,35 @@ version.
 * `package` — the `<package>` segment of the id.
 * `selected` — true if this is the keyboard pointed to by
   `KMSelectedKeyboardKey`.
+* `language` — **present only when the keyboard's `kmp.json` lists
+  exactly one language**, in which case the field carries that
+  language's display name. Absent (not `null`) for keyboards with zero
+  or multiple languages.
+
+The text variant of `list` shows the single language inline in square
+brackets when present, `[Multiple]` for multi-language keyboards, and
+nothing when no language metadata is available.
+
+Add `--all-languages` to additionally emit a `languages` array with
+every `{name, id}` pair recorded in `kmp.json` (the singular
+`language` field, if applicable, stays alongside):
+
+```json
+{
+  "id": "/sil_euro_latin/sil_euro_latin.kmx",
+  "name": "EuroLatin (SIL)",
+  "package": "sil_euro_latin",
+  "selected": false,
+  "languages": [
+    { "name": "Arbëreshë Albanian", "id": "aae" },
+    { "name": "Saint Lucian Creole French", "id": "acf" }
+  ]
+}
+```
+
+`--all-languages` also applies to `keyman status --json` and
+`keyman select <id> --json` (anywhere a keyboard appears in JSON
+output).
 
 ### `keyman status --json`
 

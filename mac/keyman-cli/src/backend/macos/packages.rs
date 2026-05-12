@@ -1,16 +1,17 @@
 /*
  * Keyman is copyright (C) SIL Global. MIT License.
  *
- * Read keyboard display names from `kmp.json` package descriptors.
+ * Read keyboard display names and BCP-47 language tags from `kmp.json`
+ * package descriptors.
  *
  * Each package lives at
  * `~/Library/Application Support/keyman.inputmethod.Keyman/Keyman-Keyboards/<package>/`.
  * The descriptor `kmp.json` contains a `keyboards` array; each entry
- * carries an `id` (matches the .kmx stem) and a `name` (the human-
- * readable display name shown in Keyman's menu). If we cannot read or
- * parse the file we fall through silently and the caller uses the
- * keyboard stem as a fallback — this is a "best effort" path, not a
- * correctness path.
+ * carries an `id` (matches the .kmx stem), a `name` (display name
+ * shown in Keyman's menu), and a `languages` array of `{id, name}`
+ * pairs. If the file is missing or unparseable we return defaults;
+ * the caller falls back to the keyboard stem and an empty language
+ * list. This is a best-effort path, not a correctness path.
  */
 
 use std::fs;
@@ -18,7 +19,13 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::keyboard::KeyboardId;
+use crate::keyboard::{KeyboardId, Language};
+
+#[derive(Debug, Default)]
+pub struct PackageInfo {
+    pub display_name: Option<String>,
+    pub languages: Vec<Language>,
+}
 
 #[derive(Debug, Deserialize)]
 struct KmpJson {
@@ -30,6 +37,16 @@ struct KmpJson {
 
 #[derive(Debug, Deserialize)]
 struct KmpKeyboard {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    languages: Vec<KmpLanguage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KmpLanguage {
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
@@ -48,25 +65,56 @@ struct KmpInfoEntry {
     description: Option<String>,
 }
 
-pub fn display_name_for(id: &KeyboardId, root: &Path) -> Option<String> {
-    let pkg = id.package()?;
-    let stem = id.stem()?;
+pub fn info_for(id: &KeyboardId, root: &Path) -> PackageInfo {
+    let Some(pkg) = id.package() else {
+        return PackageInfo::default();
+    };
+    let Some(stem) = id.stem() else {
+        return PackageInfo::default();
+    };
     let kmp_path = root.join(pkg).join("kmp.json");
-    let bytes = fs::read(&kmp_path).ok()?;
-    let parsed: KmpJson = serde_json::from_slice(&bytes).ok()?;
-    let from_keyboards = parsed.keyboards.iter().find_map(|kb| {
-        let kb_id = kb.id.as_deref()?;
-        if kb_id.eq_ignore_ascii_case(stem) {
-            kb.name.clone().filter(|n| !n.is_empty())
-        } else {
-            None
-        }
+    let Ok(bytes) = fs::read(&kmp_path) else {
+        return PackageInfo::default();
+    };
+    let Ok(parsed) = serde_json::from_slice::<KmpJson>(&bytes) else {
+        return PackageInfo::default();
+    };
+
+    let entry = parsed.keyboards.iter().find(|kb| {
+        kb.id
+            .as_deref()
+            .is_some_and(|kb_id| kb_id.eq_ignore_ascii_case(stem))
     });
-    from_keyboards.or_else(|| {
-        parsed
-            .info
-            .and_then(|i| i.name)
-            .and_then(|n| n.description)
-            .filter(|s| !s.is_empty())
-    })
+
+    let display_name = entry
+        .and_then(|kb| kb.name.clone())
+        .filter(|n| !n.is_empty())
+        .or_else(|| {
+            parsed
+                .info
+                .and_then(|i| i.name)
+                .and_then(|n| n.description)
+                .filter(|s| !s.is_empty())
+        });
+
+    let languages = entry
+        .map(|kb| {
+            kb.languages
+                .iter()
+                .filter_map(|l| {
+                    let lang_id = l.id.clone()?;
+                    let lang_name = l.name.clone().unwrap_or_else(|| lang_id.clone());
+                    Some(Language {
+                        name: lang_name,
+                        id: lang_id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    PackageInfo {
+        display_name,
+        languages,
+    }
 }

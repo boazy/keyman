@@ -8,7 +8,24 @@
 
 use serde::Serialize;
 
-use crate::keyboard::{ActivateOutcome, ImState, Keyboard, KeyboardId, SelectOutcome, Status};
+use crate::keyboard::{
+    ActivateOutcome, ImState, Keyboard, KeyboardId, Language, SelectOutcome, Status,
+};
+
+#[derive(Debug, Serialize)]
+pub struct LanguageJson {
+    pub name: String,
+    pub id: String,
+}
+
+impl From<&Language> for LanguageJson {
+    fn from(l: &Language) -> Self {
+        Self {
+            name: l.name.clone(),
+            id: l.id.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct KeyboardJson {
@@ -16,15 +33,31 @@ pub struct KeyboardJson {
     pub name: String,
     pub package: String,
     pub selected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub languages: Option<Vec<LanguageJson>>,
 }
 
-impl From<&Keyboard> for KeyboardJson {
-    fn from(k: &Keyboard) -> Self {
+impl KeyboardJson {
+    pub fn from_keyboard(k: &Keyboard, include_all_languages: bool) -> Self {
+        let language = if k.languages.len() == 1 {
+            Some(k.languages[0].name.clone())
+        } else {
+            None
+        };
+        let languages = if include_all_languages && !k.languages.is_empty() {
+            Some(k.languages.iter().map(LanguageJson::from).collect())
+        } else {
+            None
+        };
         Self {
             id: k.id.as_str().to_string(),
             name: k.name.clone(),
             package: k.package.clone(),
             selected: k.selected,
+            language,
+            languages,
         }
     }
 }
@@ -43,12 +76,15 @@ pub struct StatusJson {
 }
 
 impl StatusJson {
-    pub fn from_status(s: &Status) -> Self {
+    pub fn from_status(s: &Status, include_all_languages: bool) -> Self {
         Self {
             im_registered: s.im_state.im_registered,
             im_selected: s.im_state.im_selected,
             im_process_running: s.im_state.im_process_running,
-            selected_keyboard: s.selected_keyboard.as_ref().map(KeyboardJson::from),
+            selected_keyboard: s
+                .selected_keyboard
+                .as_ref()
+                .map(|k| KeyboardJson::from_keyboard(k, include_all_languages)),
         }
     }
 }
@@ -60,10 +96,10 @@ pub struct SelectJson {
     pub previous_selection: Option<String>,
 }
 
-impl From<&SelectOutcome> for SelectJson {
-    fn from(o: &SelectOutcome) -> Self {
+impl SelectJson {
+    pub fn from_outcome(o: &SelectOutcome, include_all_languages: bool) -> Self {
         Self {
-            selected: KeyboardJson::from(&o.selected),
+            selected: KeyboardJson::from_keyboard(&o.selected, include_all_languages),
             im_activated: o.im_activated,
             previous_selection: o.previous_selection.as_ref().map(KeyboardId::to_string),
         }

@@ -16,5 +16,7 @@ pub mod resolver;
 
 pub use client::KeymanClient;
 pub use error::{CliError, Result};
-pub use keyboard::{ActivateOutcome, ImState, Keyboard, KeyboardId, SelectOutcome, Status};
+pub use keyboard::{
+    ActivateOutcome, ImState, Keyboard, KeyboardId, Language, SelectOutcome, Status,
+};
 pub use resolver::{resolve_keyboard, ResolveError, ResolveOk};

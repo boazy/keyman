@@ -19,6 +19,9 @@ use keyman_cli::keyboard::Keyboard;
 use keyman_cli::output::{ActivateJson, KeyboardJson, ListJson, SelectJson, StatusJson};
 use keyman_cli::resolver::{resolve_keyboard, ResolveError};
 
+const ALL_LANGUAGES_HELP: &str =
+    "In --json output, emit a `languages` array with every BCP-47 tag the keyboard supports";
+
 #[derive(Parser)]
 #[command(
     name = "keyman",
@@ -37,6 +40,8 @@ enum Command {
     List {
         #[arg(long, help = "Emit machine-readable JSON instead of text")]
         json: bool,
+        #[arg(long = "all-languages", help = ALL_LANGUAGES_HELP)]
+        all_languages: bool,
     },
     #[command(
         about = "Report whether Keyman is the active OS input method and which keyboard is selected"
@@ -44,6 +49,8 @@ enum Command {
     Status {
         #[arg(long, help = "Emit machine-readable JSON instead of text")]
         json: bool,
+        #[arg(long = "all-languages", help = ALL_LANGUAGES_HELP)]
+        all_languages: bool,
     },
     #[command(
         about = "Make Keyman the active OS input method without changing the selected keyboard"
@@ -58,6 +65,8 @@ enum Command {
         keyboard: String,
         #[arg(long, help = "Emit machine-readable JSON instead of text")]
         json: bool,
+        #[arg(long = "all-languages", help = ALL_LANGUAGES_HELP)]
+        all_languages: bool,
     },
 }
 
@@ -75,18 +84,31 @@ fn main() -> ExitCode {
 fn dispatch(cli: &Cli) -> Result<()> {
     let client = new_client();
     match &cli.command {
-        Command::List { json } => cmd_list(client.as_ref(), *json),
-        Command::Status { json } => cmd_status(client.as_ref(), *json),
+        Command::List {
+            json,
+            all_languages,
+        } => cmd_list(client.as_ref(), *json, *all_languages),
+        Command::Status {
+            json,
+            all_languages,
+        } => cmd_status(client.as_ref(), *json, *all_languages),
         Command::Activate { json } => cmd_activate(client.as_ref(), *json),
-        Command::Select { keyboard, json } => cmd_select(client.as_ref(), keyboard, *json),
+        Command::Select {
+            keyboard,
+            json,
+            all_languages,
+        } => cmd_select(client.as_ref(), keyboard, *json, *all_languages),
     }
 }
 
-fn cmd_list(client: &dyn KeymanClient, json: bool) -> Result<()> {
+fn cmd_list(client: &dyn KeymanClient, json: bool, all_languages: bool) -> Result<()> {
     let keyboards = client.list_keyboards()?;
     if json {
         let payload = ListJson {
-            keyboards: keyboards.iter().map(KeyboardJson::from).collect(),
+            keyboards: keyboards
+                .iter()
+                .map(|k| KeyboardJson::from_keyboard(k, all_languages))
+                .collect(),
         };
         write_json(&payload);
     } else {
@@ -99,17 +121,18 @@ fn cmd_list(client: &dyn KeymanClient, json: bool) -> Result<()> {
             .map(|k| k.id.as_str().len())
             .max()
             .unwrap_or(0);
+        let name_width = keyboards.iter().map(|k| k.name.len()).max().unwrap_or(0);
         for k in &keyboards {
-            print_keyboard_row(k, id_width);
+            print_keyboard_row(k, id_width, name_width);
         }
     }
     Ok(())
 }
 
-fn cmd_status(client: &dyn KeymanClient, json: bool) -> Result<()> {
+fn cmd_status(client: &dyn KeymanClient, json: bool, all_languages: bool) -> Result<()> {
     let status = client.status()?;
     if json {
-        let payload = StatusJson::from_status(&status);
+        let payload = StatusJson::from_status(&status, all_languages);
         write_json(&payload);
     } else {
         println!(
@@ -125,7 +148,10 @@ fn cmd_status(client: &dyn KeymanClient, json: bool) -> Result<()> {
             yn(status.im_state.im_process_running)
         );
         match &status.selected_keyboard {
-            Some(k) => println!("keyman: selected keyboard: {} ({})", k.name, k.id),
+            Some(k) => {
+                let suffix = language_suffix(k);
+                println!("keyman: selected keyboard: {} ({}){}", k.name, k.id, suffix);
+            }
             None => println!("keyman: selected keyboard: (none)"),
         }
     }
@@ -151,7 +177,12 @@ fn cmd_activate(client: &dyn KeymanClient, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_select(client: &dyn KeymanClient, input: &str, json: bool) -> Result<()> {
+fn cmd_select(
+    client: &dyn KeymanClient,
+    input: &str,
+    json: bool,
+    all_languages: bool,
+) -> Result<()> {
     let active = client.list_keyboards()?;
     let active_ids: Vec<_> = active.iter().map(|k| k.id.clone()).collect();
     let resolved = match resolve_keyboard(input, &active_ids) {
@@ -167,7 +198,7 @@ fn cmd_select(client: &dyn KeymanClient, input: &str, json: bool) -> Result<()> 
 
     let outcome = client.select_keyboard(&resolved)?;
     if json {
-        let payload = SelectJson::from(&outcome);
+        let payload = SelectJson::from_outcome(&outcome, all_languages);
         write_json(&payload);
     } else if outcome.im_activated {
         println!(
@@ -183,14 +214,25 @@ fn cmd_select(client: &dyn KeymanClient, input: &str, json: bool) -> Result<()> 
     Ok(())
 }
 
-fn print_keyboard_row(k: &Keyboard, id_width: usize) {
+fn print_keyboard_row(k: &Keyboard, id_width: usize, name_width: usize) {
     let marker = if k.selected { "*" } else { " " };
+    let suffix = language_suffix(k);
     println!(
-        "{marker} {:id_width$}  {}",
+        "{marker} {:id_width$}  {:name_width$}{}",
         k.id,
         k.name,
-        id_width = id_width
+        suffix,
+        id_width = id_width,
+        name_width = name_width,
     );
+}
+
+fn language_suffix(k: &Keyboard) -> String {
+    match k.languages.len() {
+        0 => String::new(),
+        1 => format!("  [{}]", k.languages[0].name),
+        _ => "  [Multiple]".to_string(),
+    }
 }
 
 fn yn(b: bool) -> &'static str {
