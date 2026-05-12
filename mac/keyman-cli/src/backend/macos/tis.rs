@@ -10,11 +10,14 @@
  * are required; a normal user-session process can call these APIs.
  */
 
+use std::path::PathBuf;
+
 use core_foundation::array::{CFArray, CFArrayRef};
 use core_foundation::base::{CFType, CFTypeRef, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
 use core_foundation::string::{CFString, CFStringRef};
+use core_foundation::url::CFURL;
 use core_foundation_sys::base::{Boolean, OSStatus};
 
 use crate::error::{CliError, Result};
@@ -39,6 +42,36 @@ extern "C" {
     static kTISPropertyBundleID: CFStringRef;
     static kTISPropertyInputSourceID: CFStringRef;
     static kTISPropertyInputSourceIsEnabled: CFStringRef;
+    static kTISPropertyIconImageURL: CFStringRef;
+}
+
+/// Walk the path to a known-inside-the-bundle resource (e.g. icon) up
+/// to the enclosing `.app` directory, so we can pass that absolute
+/// path to `open -a` and bypass `open -b`'s ambiguous bundle-id
+/// resolution. macOS only ever registers ONE input-source bundle per
+/// `kTISPropertyBundleID`, so this is provably the bundle currently
+/// loaded as the IM, never a stray build-tree copy.
+pub fn installed_bundle_path(bundle_id: &str) -> Option<PathBuf> {
+    let sources = list_sources_for_bundle(bundle_id);
+    let source = *sources.first()?;
+    let icon_url = unsafe {
+        let raw = TISGetInputSourceProperty(source, kTISPropertyIconImageURL);
+        if raw.is_null() {
+            return None;
+        }
+        CFURL::wrap_under_get_rule(raw.cast())
+    };
+    let icon_path = icon_url.to_path()?;
+    for ancestor in icon_path.ancestors() {
+        if ancestor
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("app"))
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
 }
 
 pub fn query_state(bundle_id: &str) -> Result<ImState> {

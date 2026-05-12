@@ -24,18 +24,24 @@ use crate::keyboard::KeyboardId;
 
 pub fn send_select(id: &KeyboardId) -> Result<()> {
     let url = format!("keyman:select?path={}", percent_encode_path(id.as_str()));
-    // Use `-b <bundle id>` to route the URL specifically to the Keyman
-    // input-method app. Plain `open <url>` consults LaunchServices'
-    // default handler for the `keyman:` scheme, but multiple unrelated
-    // apps on a typical macOS install also claim `keyman:` (Convert
-    // Video, Encrypt Files, …); targeting by bundle id avoids that
-    // ambiguity.
-    let output = Command::new("/usr/bin/open")
-        .arg("-g")
-        .arg("-b")
-        .arg(super::KEYMAN_BUNDLE_ID)
-        .arg(&url)
-        .output()?;
+    let mut cmd = Command::new("/usr/bin/open");
+    cmd.arg("-g");
+    // Resolve the IM bundle's absolute path via TIS (the only API
+    // that's guaranteed to return the bundle actually loaded as the
+    // input method, never a stray build-tree copy LaunchServices may
+    // have indexed). `open -a <path>` then sends the URL to that
+    // specific bundle, with no resolution ambiguity. We retain `-b
+    // <bundle-id>` as a fall-through for the rare case where the IM
+    // source isn't (yet) discoverable via TIS — for example on a
+    // freshly-installed Keyman whose initial registration is still
+    // settling — and we also de-fang the `keyman:` URL-scheme
+    // collision risk (Convert Video and Encrypt Files also claim it).
+    if let Some(bundle) = super::tis::installed_bundle_path(super::KEYMAN_BUNDLE_ID) {
+        cmd.arg("-a").arg(bundle);
+    } else {
+        cmd.arg("-b").arg(super::KEYMAN_BUNDLE_ID);
+    }
+    let output = cmd.arg(&url).output()?;
     if !output.status.success() {
         return Err(CliError::UrlDispatchFailed {
             reason: String::from_utf8_lossy(&output.stderr).into_owned(),
