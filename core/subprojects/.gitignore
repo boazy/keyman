@@ -3,3 +3,4 @@
 /*.tgz
 /packagecache
 /googletest*/
+.wraplock
