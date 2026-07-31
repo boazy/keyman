@@ -1,0 +1,91 @@
+name: Keyman macOS release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'keyman-snapshot-*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish Keyman DMG
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: bash
+    env:
+      GHA_TEST_BUILD: true
+      GHA_BRANCH: ${{ github.ref_name }}
+      KEYMAN_BUILD_LEVEL: build
+      KEYMAN_CI_SKIP_NVM: true
+      CERTIFICATE_ID: ''
+      DEVELOPMENT_TEAM: ''
+    steps:
+      - name: Checkout tagged revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+
+          brew install bash coreutils carthage cocoapods meson ninja pandoc
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Build Keyman app
+        run: ./mac/build.sh configure build
+
+      - name: Ad-hoc sign app
+        run: |
+          set -euo pipefail
+
+          app=mac/Keyman4MacIM/build/Release/Keyman.app
+          codesign --force --deep --sign - --options runtime \
+            --entitlements mac/Keyman4MacIM/Keyman.entitlements \
+            "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+      - name: Build Keyman DMG
+        run: ./mac/build.sh publish
+
+      - name: Package release asset
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          app_binary=mac/Keyman4MacIM/build/Release/Keyman.app/Contents/MacOS/Keyman
+          architectures="$(lipo -archs "$app_binary")"
+          if [[ " $architectures " != *" arm64 "* || " $architectures " != *" x86_64 "* ]]; then
+            echo "Expected a universal Keyman.app binary, found: $architectures" >&2
+            exit 1
+          fi
+
+          dmg_files=(mac/Keyman4MacIM/output/upload/*/*.dmg)
+          if (( ${#dmg_files[@]} != 1 )); then
+            echo "Expected exactly one DMG, found ${#dmg_files[@]}" >&2
+            exit 1
+          fi
+
+          mkdir -p dist
+          cp "${dmg_files[0]}" dist/keyman-macos.dmg
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          release_args=(--title "$TAG" --generate-notes)
+          if [[ "$TAG" == keyman-snapshot-* ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/keyman-macos.dmg --clobber
+          else
+            gh release create "$TAG" dist/keyman-macos.dmg "${release_args[@]}"
+          fi
