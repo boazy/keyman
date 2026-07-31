@@ -1,0 +1,53 @@
+name: Keyman CLI release
+
+on:
+  push:
+    tags:
+      - 'keyman-cli-*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish macOS binaries
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout tagged revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Apple Silicon Rust target
+        run: rustup target add aarch64-apple-darwin
+
+      - name: Build Apple Silicon release binary
+        working-directory: mac/keyman-cli
+        run: cargo build --locked --release --target aarch64-apple-darwin
+
+      - name: Package release assets
+        working-directory: mac/keyman-cli
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          tar -C target/aarch64-apple-darwin/release -czf dist/keyman-cli-macos-arm64.tar.gz keyman
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          release_args=(--title "$TAG" --generate-notes)
+          if [[ "$TAG" == keyman-cli-snapshot-* ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" mac/keyman-cli/dist/*.tar.gz --clobber
+          else
+            gh release create "$TAG" mac/keyman-cli/dist/*.tar.gz "${release_args[@]}"
+          fi
